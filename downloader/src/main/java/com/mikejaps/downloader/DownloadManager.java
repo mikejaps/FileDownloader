@@ -16,7 +16,7 @@ public class DownloadManager {
     }
 
     public void init(Context context) {
-        DownLoadDaoHelper.DownLoadDaoHelper().init(context);
+        DownLoadDaoHelper.getDownLoadDaoHelper().init(context);
     }
 
     public void startDownload(String url, String dir, String name, DownloadCallback callback) {
