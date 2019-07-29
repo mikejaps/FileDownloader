@@ -6,7 +6,7 @@ import java.io.File;
  * Description:
  * Data：4/19/2018-1:46 PM
  *
- * @author: yanzhiwen
+ * @author: mikejaps
  */
 public interface DownloadCallback {
     /**

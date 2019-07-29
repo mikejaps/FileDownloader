@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Description:每个apk的下载，这个类需要复用的
  * Data：4/19/2018-1:45 PM
  *
- * @author: yanzhiwen
+ * @author: mikejaps
  */
 public class DownloadTask {
     private static final String TAG = "DownloadTask";

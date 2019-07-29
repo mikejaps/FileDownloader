@@ -22,7 +22,7 @@ import okhttp3.Response;
  * Description:
  * Data：4/19/2018-1:45 PM
  *
- * @author: yanzhiwen
+ * @author: mikejaps
  */
 public class DownloadDispatcher {
     private static final String TAG = "DownloadDispatcher";
