@@ -60,10 +60,10 @@ public class DownloadDispatcher {
         if (mExecutorService == null) {
             mExecutorService = new ThreadPoolExecutor(CORE_POOL_SIZE, Integer.MAX_VALUE, 60, TimeUnit.SECONDS,
                     new SynchronousQueue<>(), r -> {
-                        Thread thread = new Thread(r);
-                        thread.setDaemon(false);
-                        return thread;
-                    });
+                Thread thread = new Thread(r);
+                thread.setDaemon(false);
+                return thread;
+            });
         }
         return mExecutorService;
     }
@@ -74,7 +74,12 @@ public class DownloadDispatcher {
      * @param url      下载的地址
      * @param callBack 回调接口
      */
-    public void startDownload(final String url,final String dir, final String name, final DownloadCallback callBack) {
+    public synchronized void startDownload(final String url, final String dir, final String name, final DownloadCallback callBack) {
+        for (DownloadTask task : runningTasks) {
+            if (url.equals(task.getUrl())) {
+                return;
+            }
+        }
         Call call = HttpManager.getInstance().asyncCall(url);
         call.enqueue(new Callback() {
             @Override
@@ -88,12 +93,13 @@ public class DownloadDispatcher {
                 long contentLength = response.body().contentLength();
                 Log.i(TAG, "contentLength=" + contentLength);
                 if (contentLength <= -1) {
+                    callBack.onFailure(new Exception("contentLength < 0"));
                     return;
                 }
-                DownloadTask   downloadTask = new DownloadTask(name, dir,url, THREAD_SIZE, contentLength, callBack);
 
-                downloadTask.init();
+                DownloadTask downloadTask = new DownloadTask(name, dir, url, THREAD_SIZE, contentLength, callBack);
                 runningTasks.add(downloadTask);
+                downloadTask.run();
             }
         });
     }
@@ -113,12 +119,14 @@ public class DownloadDispatcher {
     }
 
     /**
-     * @param downLoadTask 下载任务
+     * @param url 下载任务
      */
-    public void recyclerTask(DownloadTask downLoadTask) {
-        runningTasks.remove(downLoadTask);
-        //参考OkHttp的Dispatcher()的源码
-        //readyTasks.
+    public void recyclerTask(String url) {
+        for (DownloadTask task : runningTasks) {
+            if (task.getUrl().equals(url)) {
+                runningTasks.remove(task);
+            }
+        }
     }
 
 

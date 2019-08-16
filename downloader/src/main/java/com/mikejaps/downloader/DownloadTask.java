@@ -27,7 +27,7 @@ public class DownloadTask {
     //文件的大小
     private long mContentLength;
     //下载文件的线程的个数
-    private int mThreadSize;
+    private int mThreadCount;
     //线程下载成功的个数，AtomicInteger
     private AtomicInteger mSuccessNumber;
     //总进度=每个线程的进度的和
@@ -35,95 +35,117 @@ public class DownloadTask {
     //正在执行下载任务的runnable
     private List<DownloadRunnable> mDownloadRunnables;
     private DownloadCallback mDownloadCallback;
-    private DownloadEntity downloadEntity;
 
     public DownloadTask(String name, String dir, String url, int threadSize, long contentLength, DownloadCallback callBack) {
         this.name = name;
         this.url = url;
         this.dir = dir;
-        this.mThreadSize = threadSize;
+        this.mThreadCount = threadSize;
         this.mContentLength = contentLength;
         this.mDownloadRunnables = new ArrayList<>();
         this.mDownloadCallback = callBack;
     }
 
-    public void init() {
+    public void run() {
         mSuccessNumber = new AtomicInteger();
-        mTotalProgress = 0;
         File file = new File(dir, name);
         //每个线程的下载的大小threadSize
-        long threadSize = mContentLength / mThreadSize;
+        long threadSize = mContentLength / mThreadCount;
         List<DownloadEntity> entities = DownLoadDaoHelper.getDownLoadDaoHelper().queryAll(url);
-        for (int i = 0; i < mThreadSize; i++) {
+        boolean newStart = true;
+        boolean dbExit = false;
+        if (entities != null && entities.size() > 0)
+            dbExit = true;
+
+        if (file.exists()) {
+            if (dbExit)
+                newStart = false;
+            else {
+                for (int i = 0; i < 10; i++) {
+                    Log.d(TAG, "init: file.exists db not exit new file");
+                    file = new File(dir, name + "(" + i + ")");
+                    if (!file.exists()) {
+                        name = name + "(" + i + ")";
+                        break;
+                    }
+                }
+            }
+        } else {
+            if (dbExit) {
+                Log.d(TAG, "init: file not exists, db  exit remove(url)");
+                DownLoadDaoHelper.getDownLoadDaoHelper().remove(url);
+            }
+        }
+
+        long[] pro = new long[mThreadCount];
+        for (int i = 0; i < mThreadCount; i++) {
             //初始化的时候，需要读取数据库
             //开始下载的位置
             final int j = i;
             long start = i * threadSize;
             //结束下载的位置
             long end = start + threadSize - 1;
-            if (i == mThreadSize - 1) {
+            if (i == mThreadCount - 1) {
                 end = mContentLength;
             }
-
-            if (!file.exists()) {
-                DownLoadDaoHelper.getDownLoadDaoHelper().remove(url);
-                downloadEntity = new DownloadEntity(start, end, url, i, 0, mContentLength);
-                Log.d(TAG, "init: 文件不存在从头下载" + downloadEntity.toString());
+            DownloadEntity downloadEntity;
+            if (newStart) {
+                downloadEntity = new DownloadEntity(start, end, url, i, 0, end - start);
+                Log.d(TAG, "init: 文件不存在从头下载");
             } else {
                 downloadEntity = getEntity(i, entities);
-
+                if (downloadEntity == null)
+                    downloadEntity = new DownloadEntity(start, end, url, i, 0, end - start);
                 start = start + downloadEntity.getProgress();
                 mTotalProgress += downloadEntity.getProgress();
+                pro[i] = downloadEntity.getProgress();
                 if (threadSize <= downloadEntity.getProgress()) {
-                    Log.d(TAG, "init: 文件存在，线程" +i+"已经下载完毕");
+                    Log.d(TAG, "init: 文件存在，线程" + i + "已经下载完毕");
                     mSuccessNumber.incrementAndGet();
-                    Log.d(TAG, "mSuccessNumber.get()="+mSuccessNumber.get()+" ; mThreadSize ="+mThreadSize);
-                    if (mSuccessNumber.get() == mThreadSize) {
-                        Log.d(TAG, "init: 文件存在，所有线程" +"已经下载完毕，直接返回");
+                    if (mSuccessNumber.get() == mThreadCount) {
+                        Log.d(TAG, "init: 文件存在，所有线程已经下载完毕，直接返回");
                         mDownloadCallback.onSuccess(file);
-                        DownloadDispatcher.getInstance().recyclerTask(DownloadTask.this);
+                        DownloadDispatcher.getInstance().recyclerTask(url);
                         return;
                     }
                     continue;
                 }
-                Log.d(TAG, "init: 上次保存的进度mTotalProgress=" + mTotalProgress);
             }
-
-
+            Log.d(TAG, "init: 上次保存的进度mTotalProgress=" + mTotalProgress);
             final DownloadRunnable downloadRunnable = new DownloadRunnable(name, dir, url, mContentLength, j, start, end,
-                    downloadEntity.getProgress(), downloadEntity, new DownloadRunnable.DownloadCallback() {
+                    downloadEntity.getProgress(), new DownloadRunnable.DownloadCallback() {
                 @Override
                 public void onFailure(Exception e, long mProgress) {
                     retryOrFail(j, e, mProgress);
-                    //Logger.d(TAG, "onFailure = " + e);
+                    DownloadDispatcher.getInstance().recyclerTask(url);
                 }
 
                 @Override
                 public void onSuccess(File file) {
                     mSuccessNumber.incrementAndGet();
-                    if (mSuccessNumber.get() == mThreadSize) {
+                    if (mSuccessNumber.get() == mThreadCount) {
                         mDownloadCallback.onSuccess(file);
-                        DownloadDispatcher.getInstance().recyclerTask(DownloadTask.this);
-                        //如果下载完毕，清除数据库
-                        // DaoManagerHelper.getManager().remove(url);
+                        DownloadDispatcher.getInstance().recyclerTask(url);
                         Log.d(TAG, "onSuccess............");
                     }
                 }
 
                 @Override
-                public void onProgress(long progress, long currentLength) {
-                    //叠加下progress，实时去更新进度条
-                    //这里需要synchronized下
+                public void onProgress(long progress, int threadId) {
+                    pro[threadId] = progress;
                     synchronized (DownloadTask.this) {
-                        mTotalProgress = mTotalProgress + progress;
-                        Log.d(TAG, "onProgress: mTotalProgress = " + mTotalProgress + "; mContentLength = " + mContentLength);
-                        mDownloadCallback.onProgress(mTotalProgress, currentLength);
+                        long sum = 0;
+                        for (int k = 0; k < mThreadCount; k++)
+                            sum += pro[k];
+                        mTotalProgress = sum;
+                        Log.d(TAG, "onProgress: mTotalProgress = " + mTotalProgress + "; progress= " + progress + "; mContentLength = " + mContentLength);
+                        mDownloadCallback.onProgress(mTotalProgress, mContentLength);
                     }
                 }
 
                 @Override
-                public void onPause(long progress, long currentLength) {
-                    mDownloadCallback.onPause(mTotalProgress, currentLength);
+                public void onPause(long progress, int threadId) {
+                    mDownloadCallback.onPause(mTotalProgress, threadId);
                 }
             });
             //通过线程池去执行
@@ -141,6 +163,7 @@ public class DownloadTask {
             DownloadDispatcher.getInstance().executorService().execute(mDownloadRunnables.get(i));
         } else {
             mDownloadCallback.onFailure(e);
+            DownloadDispatcher.getInstance().recyclerTask(url);
             stopDownload();
         }
     }

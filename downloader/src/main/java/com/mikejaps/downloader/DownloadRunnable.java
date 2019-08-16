@@ -42,9 +42,8 @@ public class DownloadRunnable implements Runnable {
     //文件的总大小 content-length
     private long mCurrentLength;
     private DownloadCallback downloadCallback;
-    private DownloadEntity mDownloadEntity;
 
-    public int reTryCount = 2;
+    public int reTryCount = 3;
 
     public interface DownloadCallback {
         /**
@@ -66,19 +65,19 @@ public class DownloadRunnable implements Runnable {
          *
          * @param progress
          */
-        void onProgress(long progress, long currentLength);
+        void onProgress(long progress, int threadId);
 
         /**
          * 暂停
          *
          * @param progress
-         * @param currentLength
+         * @param threadId
          */
-        void onPause(long progress, long currentLength);
+        void onPause(long progress, int threadId);
     }
 
     public DownloadRunnable(String name, String dir, String url, long currentLength, int threadId, long start, long end,
-                            long progress, DownloadEntity downloadEntity, DownloadCallback downloadCallback) {
+                            long progress,  DownloadCallback downloadCallback) {
         this.name = name;
         this.url = url;
         this.dir = dir;
@@ -87,7 +86,6 @@ public class DownloadRunnable implements Runnable {
         this.start = start;
         this.end = end;
         this.mProgress = progress;
-        this.mDownloadEntity = downloadEntity;
         this.downloadCallback = downloadCallback;
     }
 
@@ -115,7 +113,7 @@ public class DownloadRunnable implements Runnable {
             byte[] bytes = new byte[10 * 1024];
             while ((length = inputStream.read(bytes)) != -1) {
                 if (mStatus == STATUS_STOP) {
-                    downloadCallback.onPause(length, mCurrentLength);
+                    downloadCallback.onPause(length, threadId);
                     break;
                 }
                 //写入
@@ -123,7 +121,7 @@ public class DownloadRunnable implements Runnable {
                 this.mProgress = this.mProgress + length;
                 // Log.d(TAG, "run: mProgress=" + mProgress);
                 //实时去更新下进度条
-                downloadCallback.onProgress(length, mCurrentLength);
+                downloadCallback.onProgress(mProgress, threadId);
             }
             if (mStatus != STATUS_STOP) {
                 downloadCallback.onSuccess(file);
@@ -145,6 +143,7 @@ public class DownloadRunnable implements Runnable {
     }
 
     private void saveToDb() {
+        DownloadEntity mDownloadEntity= new DownloadEntity();
         mDownloadEntity.setThreadId(threadId);
         mDownloadEntity.setUrl(url);
         mDownloadEntity.setStart(start);
